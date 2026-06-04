@@ -159,11 +159,22 @@ def edit_image_with_openai(
     openai_api_key: str,
     model_name: str,
     input_image: Image.Image,
+    edit_mode: str,
     replacement_text: str,
     extra_instruction: str,
     output_size: str,
 ) -> bytes:
-    prompt = f"""
+    if edit_mode == "Remove text":
+        prompt = """
+Edit the provided image.
+
+Remove all visible text from the image. Keep everything else intact, including
+the original layout, composition, colors, lighting, background, people, objects,
+and overall style. Fill the removed text areas naturally so the image looks like
+the text was never there.
+""".strip()
+    else:
+        prompt = f"""
 Edit the provided image.
 
 Replace the visible text in the image with this exact text:
@@ -263,22 +274,32 @@ if source_image:
     st.subheader("Input image")
     st.image(source_image, caption=source_label, use_container_width=True)
 
-replacement_text = st.text_area(
-    "Replacement text",
-    placeholder="Type the exact text you want OpenAI to place on the image...",
-    height=100,
+edit_mode = st.radio(
+    "Output",
+    ["Replace text", "Remove text"],
+    horizontal=True,
 )
 
-extra_instruction = st.text_area(
-    "Optional extra instructions",
-    placeholder="Example: Use bold white uppercase text with a black outline.",
-    height=80,
-)
+replacement_text = ""
+extra_instruction = ""
 
-generate = st.button("Replace text", type="primary", disabled=not source_image)
+if edit_mode == "Replace text":
+    replacement_text = st.text_area(
+        "Replacement text",
+        placeholder="Type the exact text you want OpenAI to place on the image...",
+        height=100,
+    )
+
+    extra_instruction = st.text_area(
+        "Optional extra instructions",
+        placeholder="Example: Use bold white uppercase text with a black outline.",
+        height=80,
+    )
+
+generate = st.button(edit_mode, type="primary", disabled=not source_image)
 
 if generate:
-    if not replacement_text.strip():
+    if edit_mode == "Replace text" and not replacement_text.strip():
         st.error("Add the replacement text first.")
     else:
         with st.spinner("Sending image to OpenAI..."):
@@ -287,6 +308,7 @@ if generate:
                     openai_api_key=openai_api_key,
                     model_name=model_name.strip(),
                     input_image=source_image,
+                    edit_mode=edit_mode,
                     replacement_text=replacement_text.strip(),
                     extra_instruction=extra_instruction.strip(),
                     output_size=output_size,
