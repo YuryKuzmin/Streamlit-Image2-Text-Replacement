@@ -1,4 +1,5 @@
 import base64
+import html
 import io
 import os
 import re
@@ -12,6 +13,14 @@ from PIL import Image
 
 
 DEFAULT_MODEL = "gpt-image-2"
+REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 
 def get_secret(name: str, default: str = "") -> str:
@@ -44,6 +53,18 @@ def extract_youtube_video_id(url: str) -> Optional[str]:
     return None
 
 
+def detect_link_platform(url: str) -> str:
+    host = urlparse(url.strip()).netloc.lower().replace("www.", "")
+
+    if host in {"youtube.com", "m.youtube.com", "youtu.be"}:
+        return "youtube"
+
+    if host in {"instagram.com", "m.instagram.com"} or host.endswith(".instagram.com"):
+        return "instagram"
+
+    return "unsupported"
+
+
 def fetch_youtube_thumbnail(video_url: str) -> Tuple[Image.Image, str]:
     video_id = extract_youtube_video_id(video_url)
     if not video_id:
@@ -58,7 +79,7 @@ def fetch_youtube_thumbnail(video_url: str) -> Tuple[Image.Image, str]:
     last_error = None
     for thumbnail_url in thumbnail_urls:
         try:
-            response = requests.get(thumbnail_url, timeout=15)
+            response = requests.get(thumbnail_url, headers=REQUEST_HEADERS, timeout=15)
             response.raise_for_status()
             image = Image.open(io.BytesIO(response.content)).convert("RGB")
 
@@ -69,6 +90,61 @@ def fetch_youtube_thumbnail(video_url: str) -> Tuple[Image.Image, str]:
             last_error = exc
 
     raise RuntimeError(f"Could not download a thumbnail for this video. {last_error}")
+
+
+def extract_meta_image_url(page_html: str) -> Optional[str]:
+    patterns = [
+        r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']',
+        r'<meta[^>]+name=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image["\']',
+        r'"display_url"\s*:\s*"([^"]+)"',
+        r'"thumbnail_src"\s*:\s*"([^"]+)"',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, page_html, flags=re.IGNORECASE)
+        if match:
+            image_url = html.unescape(match.group(1))
+            return image_url.encode("utf-8").decode("unicode_escape")
+
+    return None
+
+
+def fetch_instagram_thumbnail(instagram_url: str) -> Tuple[Image.Image, str]:
+    response = requests.get(instagram_url, headers=REQUEST_HEADERS, timeout=20)
+    response.raise_for_status()
+
+    image_url = extract_meta_image_url(response.text)
+    if not image_url:
+        raise RuntimeError(
+            "Could not find a public preview image for this Instagram link. "
+            "Some Instagram posts, Reels, private accounts, age-restricted posts, "
+            "or login-gated pages do not expose a thumbnail to Streamlit."
+        )
+
+    image_response = requests.get(image_url, headers=REQUEST_HEADERS, timeout=20)
+    image_response.raise_for_status()
+
+    image = Image.open(io.BytesIO(image_response.content)).convert("RGB")
+    if image.width <= 100 or image.height <= 100:
+        raise RuntimeError("Instagram returned a preview image that is too small to edit.")
+
+    return image, image_url
+
+
+def fetch_social_thumbnail(url: str) -> Tuple[Image.Image, str, str]:
+    platform = detect_link_platform(url)
+
+    if platform == "youtube":
+        image, source = fetch_youtube_thumbnail(url)
+        return image, source, "YouTube"
+
+    if platform == "instagram":
+        image, source = fetch_instagram_thumbnail(url)
+        return image, source, "Instagram"
+
+    raise ValueError("Paste a YouTube or Instagram link, or use the image upload option.")
 
 
 def image_to_png_file(image: Image.Image) -> io.BytesIO:
@@ -123,7 +199,7 @@ Additional instructions from the user:
 st.set_page_config(page_title="OpenAI Thumbnail Text Replacer", page_icon="image")
 
 st.title("OpenAI Thumbnail Text Replacer")
-st.caption("Use a YouTube thumbnail or upload an image, then replace its text with OpenAI Image.")
+st.caption("Use a YouTube or Instagram thumbnail, or upload an image, then replace its text with OpenAI Image.")
 
 with st.sidebar:
     st.header("Access")
@@ -159,19 +235,22 @@ if not authorized:
 
 input_mode = st.radio(
     "Choose input",
-    ["YouTube video link", "Upload image"],
+    ["Social link", "Upload image"],
     horizontal=True,
 )
 
 source_image = None
 source_label = None
 
-if input_mode == "YouTube video link":
-    youtube_url = st.text_input("YouTube URL", placeholder="https://www.youtube.com/watch?v=...")
-    if youtube_url:
+if input_mode == "Social link":
+    social_url = st.text_input(
+        "YouTube or Instagram URL",
+        placeholder="https://www.youtube.com/watch?v=... or https://www.instagram.com/p/...",
+    )
+    if social_url:
         try:
-            source_image, source_label = fetch_youtube_thumbnail(youtube_url)
-            st.success("Thumbnail loaded.")
+            source_image, source_label, platform_name = fetch_social_thumbnail(social_url)
+            st.success(f"{platform_name} thumbnail loaded.")
         except Exception as exc:
             st.error(str(exc))
 else:
