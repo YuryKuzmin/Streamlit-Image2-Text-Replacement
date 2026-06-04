@@ -165,13 +165,16 @@ def edit_image_with_openai(
     output_size: str,
 ) -> bytes:
     if edit_mode == "Remove text":
-        prompt = """
+        prompt = f"""
 Edit the provided image.
 
 Remove all visible text from the image. Keep everything else intact, including
 the original layout, composition, colors, lighting, background, people, objects,
 and overall style. Fill the removed text areas naturally so the image looks like
 the text was never there.
+
+Additional instructions from the user:
+{extra_instruction or "None"}
 """.strip()
     else:
         prompt = f"""
@@ -290,11 +293,17 @@ if edit_mode == "Replace text":
         height=100,
     )
 
-    extra_instruction = st.text_area(
-        "Optional extra instructions",
-        placeholder="Example: Use bold white uppercase text with a black outline.",
-        height=80,
-    )
+extra_instruction_placeholder = (
+    "Example: Use bold white uppercase text with a black outline."
+    if edit_mode == "Replace text"
+    else "Example: Keep Sadhguru's signature in the bottom left corner."
+)
+
+extra_instruction = st.text_area(
+    "Optional extra instructions",
+    placeholder=extra_instruction_placeholder,
+    height=80,
+)
 
 generate = st.button(edit_mode, type="primary", disabled=not source_image)
 
