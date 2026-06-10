@@ -13,6 +13,15 @@ from PIL import Image
 
 
 DEFAULT_MODEL = "gpt-image-2"
+STYLE_ANALYSIS_MODEL = "gpt-5.4"
+STYLE_ANALYSIS_PROMPT = (
+    "Describe the style, font and colorization of the text on this image. "
+    "Don't add any other suggestions or questions into the output."
+)
+STYLE_INSTRUCTION_PREFIX = (
+    "When replacing the text, consider this description on original text. "
+    "Use it to accurately recreate the same style and color of text as in the original:"
+)
 REQUEST_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -155,6 +164,39 @@ def image_to_png_file(image: Image.Image) -> io.BytesIO:
     return image_file
 
 
+def analyze_text_style_with_openai(
+    openai_api_key: str,
+    input_image: Image.Image,
+) -> str:
+    client = OpenAI(api_key=openai_api_key)
+
+    image_file = image_to_png_file(input_image)
+    image_base64 = base64.b64encode(image_file.getvalue()).decode("utf-8")
+
+    response = client.responses.create(
+        model=STYLE_ANALYSIS_MODEL,
+        input=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": STYLE_ANALYSIS_PROMPT},
+                    {
+                        "type": "input_image",
+                        "image_url": f"data:image/png;base64,{image_base64}",
+                        "detail": "high",
+                    },
+                ],
+            }
+        ],
+    )
+
+    description = response.output_text.strip()
+    if not description:
+        raise RuntimeError("GPT-5.4 returned an empty text-style description.")
+
+    return f"{STYLE_INSTRUCTION_PREFIX}\n\n{description}"
+
+
 def edit_image_with_openai(
     openai_api_key: str,
     model_name: str,
@@ -277,6 +319,23 @@ if source_image:
     st.subheader("Input image")
     st.image(source_image, caption=source_label, use_container_width=True)
 
+analyze_style = st.button(
+    "Analyze text style",
+    disabled=source_image is None,
+    help="Use GPT-5.4 to describe the original text styling.",
+)
+
+if analyze_style:
+    with st.spinner("Analyzing the original text style..."):
+        try:
+            st.session_state["extra_instruction"] = analyze_text_style_with_openai(
+                openai_api_key,
+                source_image,
+            )
+            st.success("Text-style description added to Optional extra instructions.")
+        except Exception as exc:
+            st.error(str(exc))
+
 edit_mode = st.radio(
     "Output",
     ["Replace text", "Remove text"],
@@ -303,6 +362,7 @@ extra_instruction = st.text_area(
     "Optional extra instructions",
     placeholder=extra_instruction_placeholder,
     height=80,
+    key="extra_instruction",
 )
 
 generate = st.button(edit_mode, type="primary", disabled=not source_image)
