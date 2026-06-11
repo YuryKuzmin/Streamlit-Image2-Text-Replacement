@@ -265,8 +265,6 @@ with st.sidebar:
         help="Share this app key only with people you want to let use your OpenAI quota.",
     )
 
-    st.header("OpenAI settings")
-    model_name = st.text_input("Image model", value=DEFAULT_MODEL)
     output_size = st.selectbox(
         "Output size",
         ["auto", "1024x1024", "1536x1024", "1024x1536"],
