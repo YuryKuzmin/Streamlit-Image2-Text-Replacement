@@ -270,7 +270,8 @@ with st.sidebar:
         ["auto", "1024x1024", "1536x1024", "1024x1536"],
         index=0,
     )
-
+    
+model_name = DEFAULT_MODEL
 openai_api_key = os.getenv("OPENAI_API_KEY", get_secret("OPENAI_API_KEY"))
 configured_secret = os.getenv("APP_SECRET_KEY", get_secret("APP_SECRET_KEY"))
 authorized = is_authorized(app_secret_key)
